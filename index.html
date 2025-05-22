@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>客户积分管理系统</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 20px; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        input[type="text"], input[type="number"] { padding: 5px; width: 150px; }
+        button { padding: 5px 10px; background-color: #4CAF50; color: white; border: none; cursor: pointer; }
+        button:hover { background-color: #45a049; }
+        .warning { color: red; margin: 5px 0; }
+    </style>
+</head>
+<body>
+    <h1>客户积分管理</h1>
+    
+    <!-- 添加客户表单 -->
+    <div>
+        <h2>添加/修改客户</h2>
+        <input type="text" id="name" placeholder="姓名" required>
+        <input type="text" id="phone" placeholder="手机号" required>
+        <input type="number" id="points" placeholder="积分" required>
+        <button onclick="saveCustomer()">保存</button>
+        <div id="message" class="warning"></div>
+    </div>
+
+    <!-- 客户列表 -->
+    <h2>客户列表</h2>
+    <table id="customerTable">
+        <thead>
+            <tr>
+                <th>姓名</th>
+                <th>手机号</th>
+                <th>积分</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody id="customerList"></tbody>
+    </table>
+
+    <!-- 导出数据 -->
+    <div>
+        <button onclick="exportCSV()">导出CSV</button>
+    </div>
+
+    <script>
+        // 初始化加载数据
+        let customers = JSON.parse(localStorage.getItem('customers') || '[]');
+        renderTable();
+
+        // 保存客户信息
+        function saveCustomer() {
+            const name = document.getElementById('name').value;
+            const phone = document.getElementById('phone').value;
+            const points = parseInt(document.getElementById('points').value);
+
+            if (!name || !phone || isNaN(points)) {
+                showMessage('请填写完整信息！');
+                return;
+            }
+
+            // 检查是否已存在
+            const index = customers.findIndex(c => c.phone === phone);
+            if (index >= 0) {
+                customers[index] = { name, phone, points };
+            } else {
+                customers.push({ name, phone, points });
+            }
+
+            localStorage.setItem('customers', JSON.stringify(customers));
+            clearForm();
+            renderTable();
+        }
+
+        // 删除客户
+        function deleteCustomer(phone) {
+            customers = customers.filter(c => c.phone !== phone);
+            localStorage.setItem('customers', JSON.stringify(customers));
+            renderTable();
+        }
+
+        // 渲染表格
+        function renderTable() {
+            const tbody = document.getElementById('customerList');
+            tbody.innerHTML = customers.map(customer => `
+                <tr>
+                    <td>${customer.name}</td>
+                    <td>${customer.phone}</td>
+                    <td>${customer.points}</td>
+                    <td>
+                        <button onclick="editCustomer('${customer.phone}')">编辑</button>
+                        <button onclick="deleteCustomer('${customer.phone}')">删除</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // 编辑客户
+        function editCustomer(phone) {
+            const customer = customers.find(c => c.phone === phone);
+            document.getElementById('name').value = customer.name;
+            document.getElementById('phone').value = customer.phone;
+            document.getElementById('points').value = customer.points;
+        }
+
+        // 导出CSV
+        function exportCSV() {
+            const csvContent = "姓名,手机号,积分\n" + 
+                customers.map(c => `${c.name},${c.phone},${c.points}`).join("\n");
+            
+            const blob = new Blob([csvContent], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'customers.csv';
+            a.click();
+        }
+
+        // 辅助函数
+        function clearForm() {
+            document.getElementById('name').value = '';
+            document.getElementById('phone').value = '';
+            document.getElementById('points').value = '';
+            showMessage('');
+        }
+
+        function showMessage(msg) {
+            document.getElementById('message').textContent = msg;
+        }
+    </script>
+</body>
+</html>
