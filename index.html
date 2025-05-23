@@ -2,34 +2,48 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>客户积分管理系统</title>
+    <title>高级积分管理系统</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 20px; }
-        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        input[type="text"], input[type="number"] { padding: 5px; width: 150px; }
-        button { padding: 5px 10px; background-color: #4CAF50; color: white; border: none; cursor: pointer; }
-        button:hover { background-color: #45a049; }
-        .warning { color: red; margin: 5px 0; }
+        :root { --primary: #2c3e50; --secondary: #3498db; }
+        body { font-family: Arial, sans-serif; max-width: 1000px; margin: 20px auto; padding: 20px; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: var(--primary); color: white; }
+        button { padding: 8px 15px; margin: 2px; border-radius: 4px; cursor: pointer; }
+        .btn-primary { background-color: var(--secondary); border: none; color: white; }
+        .btn-danger { background-color: #e74c3c; color: white; }
+        .modal { display: none; position: fixed; top: 20%; left: 50%; transform: translateX(-50%); background: white; padding: 20px; box-shadow: 0 0 10px rgba(0,0,0,0.3); }
+        .stats { display: flex; gap: 20px; margin: 20px 0; }
+        .stat-box { background: #f8f9fa; padding: 15px; border-radius: 5px; min-width: 150px; }
     </style>
 </head>
 <body>
-    <h1>客户积分管理</h1>
-    
-    <!-- 添加客户表单 -->
-    <div>
-        <h2>添加/修改客户</h2>
-        <input type="text" id="name" placeholder="姓名" required>
-        <input type="text" id="phone" placeholder="手机号" required>
-        <input type="number" id="points" placeholder="积分" required>
-        <button onclick="saveCustomer()">保存</button>
-        <div id="message" class="warning"></div>
+    <h1>积分管理系统 <small id="storageMode"></small></h1>
+
+    <!-- 统计面板 -->
+    <div class="stats">
+        <div class="stat-box">
+            总客户数：<span id="totalCustomers">0</span>
+        </div>
+        <div class="stat-box">
+            总积分：<span id="totalPoints">0</span>
+        </div>
+        <div class="stat-box">
+            今日新增：<span id="todayNew">0</span>
+        </div>
     </div>
 
-    <!-- 客户列表 -->
-    <h2>客户列表</h2>
-    <table id="customerTable">
+    <!-- 操作区 -->
+    <div>
+        <button onclick="showModal('edit')" class="btn-primary">添加客户</button>
+        <button onclick="toggleStorage()" class="btn-primary">切换存储模式</button>
+        <button onclick="exportData()" class="btn-primary">导出数据</button>
+        <input type="file" id="importFile" onchange="importData()" style="display:none;">
+        <label for="importFile" class="btn-primary">导入数据</label>
+    </div>
+
+    <!-- 数据表格 -->
+    <table>
         <thead>
             <tr>
                 <th>姓名</th>
@@ -41,95 +55,140 @@
         <tbody id="customerList"></tbody>
     </table>
 
-    <!-- 导出数据 -->
-    <div>
-        <button onclick="exportCSV()">导出CSV</button>
+    <!-- 编辑弹窗 -->
+    <div id="editModal" class="modal">
+        <h3>客户信息</h3>
+        <input type="text" id="editName" placeholder="姓名" required><br>
+        <input type="text" id="editPhone" placeholder="手机号" required><br>
+        <input type="number" id="editPoints" placeholder="积分" required><br>
+        <button onclick="saveCustomer()" class="btn-primary">保存</button>
+        <button onclick="closeModal()">取消</button>
     </div>
 
-    <script>
-        // 初始化加载数据
-        let customers = JSON.parse(localStorage.getItem('customers') || '[]');
-        renderTable();
+    <!-- 历史记录弹窗 -->
+    <div id="historyModal" class="modal" style="width: 500px;">
+        <h3>积分变动记录 - <span id="historyPhone"></span></h3>
+        <ul id="historyList"></ul>
+        <button onclick="closeModal()">关闭</button>
+    </div>
 
-        // 保存客户信息
-        function saveCustomer() {
-            const name = document.getElementById('name').value;
-            const phone = document.getElementById('phone').value;
-            const points = parseInt(document.getElementById('points').value);
+<script>
+// ================= 配置区 =================
+const CONFIG = {
+  USE_FIREBASE: false,  // 设为true启用Firebase云端同步
+  FIREBASE_CONFIG: {
+    apiKey: "AIzaSyABC...",
+    authDomain: "your-project.firebaseapp.com",
+    databaseURL: "https://your-project.firebaseio.com",
+    projectId: "your-project"
+  },
+  ENCRYPT_DATA: true,
+  SECRET_KEY: "your-secret-123"
+};
 
-            if (!name || !phone || isNaN(points)) {
-                showMessage('请填写完整信息！');
-                return;
-            }
+// ================= 核心逻辑 =================
+let customers = [];
+let storageType = 'local';
 
-            // 检查是否已存在
-            const index = customers.findIndex(c => c.phone === phone);
-            if (index >= 0) {
-                customers[index] = { name, phone, points };
-            } else {
-                customers.push({ name, phone, points });
-            }
+// 初始化
+function init() {
+  if(CONFIG.USE_FIREBASE) {
+    initFirebase();
+    storageType = 'firebase';
+  } else {
+    loadFromLocal();
+    storageType = 'local';
+  }
+  updateUI();
+}
 
-            localStorage.setItem('customers', JSON.stringify(customers));
-            clearForm();
-            renderTable();
-        }
+// 数据存储逻辑
+async function saveData() {
+  let data = JSON.stringify(customers);
+  
+  if(CONFIG.ENCRYPT_DATA) {
+    data = CryptoJS.AES.encrypt(data, CONFIG.SECRET_KEY).toString();
+  }
 
-        // 删除客户
-        function deleteCustomer(phone) {
-            customers = customers.filter(c => c.phone !== phone);
-            localStorage.setItem('customers', JSON.stringify(customers));
-            renderTable();
-        }
+  if(storageType === 'firebase') {
+    await firebase.database().ref('customers').set(data);
+  } else {
+    localStorage.setItem('customers', data);
+  }
+  updateStats();
+}
 
-        // 渲染表格
-        function renderTable() {
-            const tbody = document.getElementById('customerList');
-            tbody.innerHTML = customers.map(customer => `
-                <tr>
-                    <td>${customer.name}</td>
-                    <td>${customer.phone}</td>
-                    <td>${customer.points}</td>
-                    <td>
-                        <button onclick="editCustomer('${customer.phone}')">编辑</button>
-                        <button onclick="deleteCustomer('${customer.phone}')">删除</button>
-                    </td>
-                </tr>
-            `).join('');
-        }
+// 数据加载逻辑
+async function loadData() {
+  let data = storageType === 'firebase' ? 
+    (await firebase.database().ref('customers').once('value')).val() :
+    localStorage.getItem('customers');
 
-        // 编辑客户
-        function editCustomer(phone) {
-            const customer = customers.find(c => c.phone === phone);
-            document.getElementById('name').value = customer.name;
-            document.getElementById('phone').value = customer.phone;
-            document.getElementById('points').value = customer.points;
-        }
+  if(!data) return;
 
-        // 导出CSV
-        function exportCSV() {
-            const csvContent = "姓名,手机号,积分\n" + 
-                customers.map(c => `${c.name},${c.phone},${c.points}`).join("\n");
-            
-            const blob = new Blob([csvContent], { type: 'text/csv' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'customers.csv';
-            a.click();
-        }
+  if(CONFIG.ENCRYPT_DATA) {
+    const bytes = CryptoJS.AES.decrypt(data, CONFIG.SECRET_KEY);
+    data = bytes.toString(CryptoJS.enc.Utf8);
+  }
 
-        // 辅助函数
-        function clearForm() {
-            document.getElementById('name').value = '';
-            document.getElementById('phone').value = '';
-            document.getElementById('points').value = '';
-            showMessage('');
-        }
+  customers = JSON.parse(data) || [];
+  renderTable();
+}
 
-        function showMessage(msg) {
-            document.getElementById('message').textContent = msg;
-        }
-    </script>
-</body>
-</html>
+// ================= 界面操作 =================
+function renderTable() {
+  const tbody = document.getElementById('customerList');
+  tbody.innerHTML = customers.map(customer => `
+    <tr>
+      <td>${customer.name}</td>
+      <td>${customer.phone}</td>
+      <td>${customer.points}</td>
+      <td>
+        <button onclick="showHistory('${customer.phone}')" class="btn-primary">历史</button>
+        <button onclick="editCustomer('${customer.phone}')" class="btn-primary">编辑</button>
+        <button onclick="deleteCustomer('${customer.phone}')" class="btn-danger">删除</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function updateStats() {
+  document.getElementById('totalCustomers').textContent = customers.length;
+  document.getElementById('totalPoints').textContent = 
+    customers.reduce((sum, c) => sum + c.points, 0);
+  document.getElementById('todayNew').textContent = 
+    customers.filter(c => isToday(c.createdAt)).length;
+}
+
+// ================= 功能函数 ================= 
+function addHistory(phone, change, reason) {
+  const customer = customers.find(c => c.phone === phone);
+  customer.history = customer.history || [];
+  customer.history.push({
+    timestamp: new Date().toISOString(),
+    change,
+    reason
+  });
+}
+
+async function deleteCustomer(phone) {
+  customers = customers.filter(c => c.phone !== phone);
+  await saveData();
+  renderTable();
+}
+
+// ================= 工具函数 =================
+function isToday(dateStr) {
+  const date = new Date(dateStr);
+  const today = new Date();
+  return date.getDate() === today.getDate() && 
+         date.getMonth() === today.getMonth() && 
+         date.getFullYear() === today.getFullYear();
+}
+
+function showModal(type) {
+  document.getElementById(`${type}Modal`).style.display = 'block';
+}
+
+function closeModal() {
+  document.querySelectorAll('.
